@@ -8,7 +8,11 @@ import {
   WalletAdapterNetwork,
   WalletError,
 } from "@solana/wallet-adapter-base";
-import { PhantomWalletAdapter } from "@solana/wallet-adapter-wallets";
+import {
+  UnsafeBurnerWalletAdapter,
+  PhantomWalletAdapter,
+} from "@solana/wallet-adapter-wallets";
+import { WalletModalProvider } from "@solana/wallet-adapter-react-ui";
 import {
   ConnectionProvider,
   WalletProvider,
@@ -21,6 +25,8 @@ import {
   AutoConnectProvider,
   useAutoConnect,
 } from "../components/AutoConnectProvider";
+// Use require instead of import since order matters
+require("@solana/wallet-adapter-react-ui/styles.css");
 
 export function Providers({ children }: { children: React.ReactNode }) {
   // Can be set to 'devnet', 'testnet', or 'mainnet-beta'
@@ -43,6 +49,7 @@ export function Providers({ children }: { children: React.ReactNode }) {
        * instantiate its legacy wallet adapter here. Common legacy adapters can be found
        * in the npm package `@solana/wallet-adapter-wallets`.
        */
+      new UnsafeBurnerWalletAdapter(),
       new PhantomWalletAdapter(),
     ],
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -84,11 +91,13 @@ export function Providers({ children }: { children: React.ReactNode }) {
       <AutoConnectProvider>
         <ConnectionProvider endpoint={endpoint}>
           <WalletProvider
-            wallets={[]}
+            wallets={wallets}
             onError={onError}
             autoConnect={autoConnect && autoSignIn}
           >
-            <NextUIProvider>{children}</NextUIProvider>;
+            <WalletModalProvider>
+              <NextUIProvider>{children}</NextUIProvider>;
+            </WalletModalProvider>
           </WalletProvider>
         </ConnectionProvider>
       </AutoConnectProvider>
