@@ -1,0 +1,359 @@
+{
+  "version": "0.1.0",
+  "name": "solana_lending",
+  "instructions": [
+    {
+      "name": "initialize",
+      "accounts": [
+        {
+          "name": "globalState",
+          "isMut": true,
+          "isSigner": false
+        },
+        {
+          "name": "payer",
+          "isMut": true,
+          "isSigner": true
+        },
+        {
+          "name": "systemProgram",
+          "isMut": false,
+          "isSigner": false
+        }
+      ],
+      "args": []
+    },
+    {
+      "name": "setConfig",
+      "accounts": [
+        {
+          "name": "config",
+          "isMut": true,
+          "isSigner": false
+        },
+        {
+          "name": "payer",
+          "isMut": true,
+          "isSigner": true
+        },
+        {
+          "name": "systemProgram",
+          "isMut": false,
+          "isSigner": false
+        }
+      ],
+      "args": [
+        {
+          "name": "minIr",
+          "type": "u16"
+        },
+        {
+          "name": "maxIr",
+          "type": "u16"
+        },
+        {
+          "name": "penaltyIr",
+          "type": "u8"
+        },
+        {
+          "name": "penaltyDays",
+          "type": "u8"
+        },
+        {
+          "name": "commissionRate",
+          "type": "u8"
+        },
+        {
+          "name": "cycle",
+          "type": "u64"
+        },
+        {
+          "name": "deadline",
+          "type": "u64"
+        }
+      ]
+    },
+    {
+      "name": "deposit",
+      "accounts": [
+        {
+          "name": "userBalance",
+          "isMut": true,
+          "isSigner": false
+        },
+        {
+          "name": "payer",
+          "isMut": true,
+          "isSigner": true
+        },
+        {
+          "name": "systemProgram",
+          "isMut": false,
+          "isSigner": false
+        }
+      ],
+      "args": [
+        {
+          "name": "amount",
+          "type": "u64"
+        }
+      ]
+    },
+    {
+      "name": "withdraw",
+      "accounts": [
+        {
+          "name": "userBalance",
+          "isMut": true,
+          "isSigner": false
+        },
+        {
+          "name": "payer",
+          "isMut": true,
+          "isSigner": true
+        },
+        {
+          "name": "systemProgram",
+          "isMut": false,
+          "isSigner": false
+        }
+      ],
+      "args": [
+        {
+          "name": "amount",
+          "type": "u64"
+        }
+      ]
+    },
+    {
+      "name": "placeOrder",
+      "accounts": [
+        {
+          "name": "order",
+          "isMut": true,
+          "isSigner": false
+        },
+        {
+          "name": "userBalance",
+          "isMut": true,
+          "isSigner": false
+        },
+        {
+          "name": "global",
+          "isMut": true,
+          "isSigner": false
+        },
+        {
+          "name": "config",
+          "isMut": false,
+          "isSigner": false
+        },
+        {
+          "name": "payer",
+          "isMut": true,
+          "isSigner": true
+        },
+        {
+          "name": "systemProgram",
+          "isMut": false,
+          "isSigner": false
+        }
+      ],
+      "args": [
+        {
+          "name": "amount",
+          "type": "u64"
+        },
+        {
+          "name": "rate",
+          "type": "u16"
+        }
+      ]
+    },
+    {
+      "name": "cancelOrder",
+      "accounts": [
+        {
+          "name": "order",
+          "isMut": true,
+          "isSigner": false
+        },
+        {
+          "name": "userBalance",
+          "isMut": true,
+          "isSigner": false
+        },
+        {
+          "name": "payer",
+          "isMut": true,
+          "isSigner": true
+        },
+        {
+          "name": "systemProgram",
+          "isMut": false,
+          "isSigner": false
+        }
+      ],
+      "args": [
+        {
+          "name": "orderSn",
+          "type": "u64"
+        }
+      ]
+    }
+  ],
+  "accounts": [
+    {
+      "name": "Order",
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "sn",
+            "type": "u64"
+          },
+          {
+            "name": "lender",
+            "type": "publicKey"
+          },
+          {
+            "name": "balance",
+            "type": "u64"
+          },
+          {
+            "name": "rate",
+            "type": "u16"
+          }
+        ]
+      }
+    },
+    {
+      "name": "UserBalance",
+      "type": {
+        "kind": "struct",
+        "fields": []
+      }
+    },
+    {
+      "name": "GlobalState",
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "currOrderSn",
+            "type": "u64"
+          },
+          {
+            "name": "currReceiptSn",
+            "type": "u64"
+          }
+        ]
+      }
+    },
+    {
+      "name": "Config",
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "minIr",
+            "type": "u16"
+          },
+          {
+            "name": "maxIr",
+            "type": "u16"
+          },
+          {
+            "name": "penaltyIr",
+            "type": "u8"
+          },
+          {
+            "name": "penaltyDays",
+            "type": "u8"
+          },
+          {
+            "name": "commissionRate",
+            "type": "u8"
+          },
+          {
+            "name": "cycle",
+            "type": "u64"
+          },
+          {
+            "name": "deadline",
+            "type": "u64"
+          }
+        ]
+      }
+    }
+  ],
+  "events": [
+    {
+      "name": "EventPlaceOrder",
+      "fields": [
+        {
+          "name": "orderSn",
+          "type": "u64",
+          "index": false
+        },
+        {
+          "name": "lender",
+          "type": "publicKey",
+          "index": false
+        },
+        {
+          "name": "balance",
+          "type": "u64",
+          "index": false
+        },
+        {
+          "name": "rate",
+          "type": "u16",
+          "index": false
+        }
+      ]
+    },
+    {
+      "name": "EventCancelOrder",
+      "fields": [
+        {
+          "name": "orderSn",
+          "type": "u64",
+          "index": false
+        },
+        {
+          "name": "lender",
+          "type": "publicKey",
+          "index": false
+        },
+        {
+          "name": "balance",
+          "type": "u64",
+          "index": false
+        }
+      ]
+    }
+  ],
+  "errors": [
+    {
+      "code": 6000,
+      "name": "InsufficientBalanceForPlaceOrder",
+      "msg": "Insufficient Balance for Place Order"
+    },
+    {
+      "code": 6001,
+      "name": "InsufficientBalanceForWithdraw",
+      "msg": "Insufficient Balance for Withdraw"
+    },
+    {
+      "code": 6002,
+      "name": "IllegalInterestRate",
+      "msg": "Illegal Interest Rate"
+    },
+    {
+      "code": 6003,
+      "name": "NoOrderFoundForCancelOrder",
+      "msg": "No Order Found for Cancel Order"
+    }
+  ]
+}
