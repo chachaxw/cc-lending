@@ -10,6 +10,12 @@ import {
   CardBody,
   Input,
   Image,
+  Modal,
+  ModalContent,
+  ModalHeader,
+  ModalBody,
+  ModalFooter,
+  useDisclosure,
 } from "@nextui-org/react";
 import { LAMPORTS_PER_SOL, PublicKey, SystemProgram } from "@solana/web3.js";
 import { useEffect, useState, useMemo, useCallback } from "react";
@@ -18,6 +24,7 @@ import {
   SPL_TOKEN_LENDING_PROGRAM_ID,
   useWorkspace,
 } from "@/components/WorkspaceProvider";
+import { getShortAddress } from "@/utils/getShortAddress";
 
 type Order = {
   sn: number;
@@ -31,14 +38,17 @@ export default function Home() {
   const { program } = useWorkspace();
   const { connection } = useConnection();
   const { connected, publicKey } = useWallet();
+  const { isOpen, onOpen, onClose } = useDisclosure();
 
   const [balance, setBalance] = useState(0);
   const [lendableBalance, setLendableBalance] = useState(0);
   const [depositValue, setDepositValue] = useState("");
   const [lendValue, setLendValue] = useState("");
+  const [borrowValue, setBorrowValue] = useState("");
   const [lending, setLending] = useState(false);
-  const [borrowing, setBorrowing] = useState(false);
   const [depositing, setDepositing] = useState(false);
+  const [borrowing, setBorrowing] = useState(false);
+  const [order, setOrder] = useState<Order | undefined>();
   const [orderList, setOrderList] = useState<Order[]>([]);
   const [loading, setLoading] = useState(false);
 
@@ -58,6 +68,16 @@ export default function Home() {
       lendValue === "0" ||
       Number(lendValue) > Number(lendableBalance.toFixed(4)),
     [lendValue, lendableBalance, connected]
+  );
+
+  const borrowDisabled = useMemo(
+    () =>
+      !order ||
+      !borrowValue ||
+      !connected ||
+      borrowValue === "0" ||
+      Number(borrowValue) > Number(order.balance.toFixed(4)),
+    [order, borrowValue, connected]
   );
 
   const getBalance = useCallback(async () => {
@@ -89,19 +109,17 @@ export default function Home() {
 
   const getOrders = useCallback(async () => {
     try {
-      if (!connected || !publicKey) throw new Error("Wallet not connected");
-
       const orders = await connection.getProgramAccounts(
         SPL_TOKEN_LENDING_PROGRAM_ID,
         {
           filters: [
             { dataSize: 58 },
-            {
-              memcmp: {
-                offset: 16,
-                bytes: publicKey.toBase58(),
-              },
-            },
+            // {
+            //   memcmp: {
+            //     offset: 16,
+            //     bytes: publicKey.toBase58(),
+            //   },
+            // },
           ],
         }
       );
@@ -127,7 +145,7 @@ export default function Home() {
     } finally {
       setLoading(true);
     }
-  }, [connected, connection, notify, publicKey]);
+  }, [connected, connection, notify]);
 
   const handleDeposit = useCallback(async () => {
     try {
@@ -228,11 +246,40 @@ export default function Home() {
     notify,
   ]);
 
-  const handleBorrow = useCallback(async () => {}, []);
+  const handleOpen = useCallback(
+    (item: Order) => {
+      setOrder(item);
+      onOpen();
+    },
+    [onOpen]
+  );
+
+  const handleClose = () => {
+    onClose();
+    setBorrowValue("");
+    setOrder(undefined);
+  };
+
+  const handleBorrow = useCallback(async () => {
+    try {
+      setBorrowing(true);
+
+      if (order) {
+        setTimeout(() => {
+          setBorrowing(false);
+        }, 3000);
+      }
+    } catch (error: any) {
+      notify("error", `Borrow failed: ${error?.message}`);
+    } finally {
+      setBorrowing(false);
+    }
+  }, [notify, order]);
 
   useEffect(() => {
+    getOrders();
+
     if (connected) {
-      getOrders();
       getBalance();
       getLendableBalance();
     }
@@ -307,7 +354,7 @@ export default function Home() {
                 type="number"
                 label={<label className="text-slate-500">Amount</label>}
                 min={0}
-                max={999}
+                max={lendValue}
                 fullWidth
                 value={lendValue}
                 onChange={(e) => setLendValue(e.target.value)}
@@ -344,20 +391,22 @@ export default function Home() {
               />
               <p className="font-semibold ml-2">Borrow</p>
             </CardHeader>
-            <CardBody className="flex-col justify-between text-small">
+            <CardBody className="flex-col justify-between text-small pt-0">
               <div>
-                <div className="flex items-center justify-between">
+                <div className="flex items-center justify-between py-2">
                   <label className="text-slate-500">Order SN</label>
                   <p className="font-semibold text-slate-700">{item.sn}</p>
                 </div>
-                <div className="flex items-center justify-between py-4">
-                  <label className="text-slate-500">Lender</label>
-                  <p className="font-semibold text-slate-700">{item.lender}</p>
-                </div>
-                <div className="flex items-center justify-between py-4">
+                <div className="flex items-center justify-between py-2">
                   <label className="text-slate-500">Balance</label>
                   <p className="font-semibold text-slate-700">
                     {item.balance.toFixed(4)} SOL
+                  </p>
+                </div>
+                <div className="flex items-center justify-between py-2">
+                  <label className="text-slate-500">Lender</label>
+                  <p className="font-semibold text-slate-700">
+                    {getShortAddress(item.lender)}
                   </p>
                 </div>
               </div>
@@ -365,10 +414,12 @@ export default function Home() {
                 className="mt-6"
                 isLoading={borrowing}
                 color={
-                  Number(item.balance.toFixed(0)) === 0 ? undefined : "primary"
+                  Number(item.balance.toFixed(4)) === 0 || !connected
+                    ? undefined
+                    : "primary"
                 }
-                disabled={Number(item.balance.toFixed(0)) === 0}
-                onClick={handleBorrow}
+                disabled={Number(item.balance.toFixed(4)) === 0 || !connected}
+                onClick={() => handleOpen(item)}
               >
                 Borrow
               </Button>
@@ -376,6 +427,57 @@ export default function Home() {
           </Card>
         ))}
       </div>
+      <Modal isOpen={isOpen} onClose={handleClose}>
+        <ModalContent>
+          {(onClose) => (
+            <>
+              <ModalHeader className="flex flex-col gap-1">
+                Modal Title
+              </ModalHeader>
+              <ModalBody>
+                <div className="flex items-center justify-between py-2">
+                  <label className="text-slate-500">Order SN</label>
+                  <p className="font-semibold text-slate-700">{order?.sn}</p>
+                </div>
+                <div className="flex items-center justify-between py-2">
+                  <label className="text-slate-500">Balance</label>
+                  <p className="font-semibold text-slate-700">
+                    {order?.balance.toFixed(4)} SOL
+                  </p>
+                </div>
+                <Input
+                  type="number"
+                  label={<label className="text-slate-500">Amount</label>}
+                  min={0}
+                  max={order?.balance.toFixed(4)}
+                  fullWidth
+                  value={borrowValue}
+                  onChange={(e) => setBorrowValue(e.target.value)}
+                  labelPlacement="outside-left"
+                  placeholder="Enter your amount"
+                  className="py-2 justify-between"
+                  classNames={{
+                    mainWrapper: "flex-auto",
+                    input: "text-right",
+                  }}
+                />
+              </ModalBody>
+              <ModalFooter>
+                <Button color="danger" variant="light" onPress={handleClose}>
+                  Close
+                </Button>
+                <Button
+                  color={borrowDisabled ? undefined : "primary"}
+                  disabled={borrowDisabled}
+                  onPress={handleBorrow}
+                >
+                  Borrow
+                </Button>
+              </ModalFooter>
+            </>
+          )}
+        </ModalContent>
+      </Modal>
     </main>
   );
 }
