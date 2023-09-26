@@ -24,7 +24,8 @@ import { useCallback, useMemo } from "react";
 import {
   AutoConnectProvider,
   useAutoConnect,
-} from "../components/AutoConnectProvider";
+} from "@/components/AutoConnectProvider";
+import { WorkspaceProvider } from "@/components/WorkspaceProvider";
 // Use require instead of import since order matters
 require("@solana/wallet-adapter-react-ui/styles.css");
 
@@ -96,7 +97,9 @@ export function Providers({ children }: { children: React.ReactNode }) {
             autoConnect={autoConnect && autoSignIn}
           >
             <WalletModalProvider>
-              <NextUIProvider>{children}</NextUIProvider>;
+              <WorkspaceProvider>
+                <NextUIProvider>{children}</NextUIProvider>;
+              </WorkspaceProvider>
             </WalletModalProvider>
           </WalletProvider>
         </ConnectionProvider>

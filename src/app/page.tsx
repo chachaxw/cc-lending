@@ -1,45 +1,63 @@
 "use client";
 
+import * as anchor from "@project-serum/anchor";
 import { useWallet, useConnection } from "@solana/wallet-adapter-react";
-import { verifySignIn } from "@solana/wallet-standard-util";
 import { WalletMultiButton } from "@solana/wallet-adapter-react-ui";
 import {
   Button,
   Card,
   CardHeader,
   CardBody,
-  Image,
   Input,
-  RadioGroup,
-  Radio,
+  Image,
 } from "@nextui-org/react";
-import { useNotify } from "../components/Notify";
-import { LAMPORTS_PER_SOL } from "@solana/web3.js";
+import { LAMPORTS_PER_SOL, PublicKey, SystemProgram } from "@solana/web3.js";
 import { useEffect, useState, useMemo, useCallback } from "react";
+import { useNotify } from "@/components/Notify";
+import {
+  SPL_TOKEN_LENDING_PROGRAM_ID,
+  useWorkspace,
+} from "@/components/WorkspaceProvider";
 
-const radioList = [{ label: "SOL", value: "sol" }];
+type Order = {
+  sn: number;
+  lender: string;
+  balance: number;
+  rate: number;
+};
 
 export default function Home() {
   const notify = useNotify();
+  const { program } = useWorkspace();
   const { connection } = useConnection();
   const { connected, publicKey } = useWallet();
 
   const [balance, setBalance] = useState(0);
+  const [lendableBalance, setLendableBalance] = useState(0);
   const [depositValue, setDepositValue] = useState("");
-  const [borrowValue, setBorrowValue] = useState("");
+  const [lendValue, setLendValue] = useState("");
+  const [lending, setLending] = useState(false);
+  const [borrowing, setBorrowing] = useState(false);
+  const [depositing, setDepositing] = useState(false);
+  const [orderList, setOrderList] = useState<Order[]>([]);
+  const [loading, setLoading] = useState(false);
 
   const depositDisabled = useMemo(
     () =>
       !depositValue ||
       !connected ||
       depositValue === "0" ||
-      Number(depositValue) > balance,
+      Number(depositValue) > Number(balance.toFixed(4)),
     [depositValue, balance, connected]
   );
 
-  const borrowDisabled = useMemo(
-    () => !borrowValue || !connected || borrowValue === "0",
-    [borrowValue, connected]
+  const lendDisabled = useMemo(
+    () =>
+      !lendValue ||
+      !connected ||
+      lendValue === "0" ||
+      Number(lendValue) > Number(lendableBalance.toFixed(4)),
+    [lendValue, lendableBalance, connected]
   );
 
   const getBalance = useCallback(async () => {
@@ -53,53 +71,193 @@ export default function Home() {
     }
   }, [connection, publicKey]);
 
+  const getLendableBalance = useCallback(async () => {
+    try {
+      if (!connected || !program || !publicKey)
+        throw new Error("Wallet not connected");
+
+      const [userBalance] = PublicKey.findProgramAddressSync(
+        [Buffer.from("balance_4"), publicKey.toBuffer()],
+        SPL_TOKEN_LENDING_PROGRAM_ID
+      );
+      const balance = await connection.getBalance(userBalance);
+      setLendableBalance(balance / LAMPORTS_PER_SOL);
+    } catch (error: any) {
+      notify("error", `Get lendable balance failed: ${error?.message}`);
+    }
+  }, [connected, connection, notify, program, publicKey]);
+
+  const getOrders = useCallback(async () => {
+    try {
+      if (!connected || !publicKey) throw new Error("Wallet not connected");
+
+      const orders = await connection.getProgramAccounts(
+        SPL_TOKEN_LENDING_PROGRAM_ID,
+        {
+          filters: [
+            { dataSize: 58 },
+            {
+              memcmp: {
+                offset: 16,
+                bytes: publicKey.toBase58(),
+              },
+            },
+          ],
+        }
+      );
+
+      const list = orders.map((e) => {
+        const data = e.account.data;
+        const sn = Number(data.readBigUInt64LE(8));
+        const lender = new PublicKey(data.subarray(16, 48));
+        const balance = Number(data.readBigUInt64LE(48));
+        const rate = data.readUInt16LE(56);
+
+        return {
+          sn,
+          lender: lender.toBase58(),
+          balance: balance / LAMPORTS_PER_SOL,
+          rate,
+        };
+      });
+
+      setOrderList(list);
+    } catch (error: any) {
+      notify("error", `Get orders failed: ${error?.message}`);
+    } finally {
+      setLoading(true);
+    }
+  }, [connected, connection, notify, publicKey]);
+
   const handleDeposit = useCallback(async () => {
     try {
-      if (!connected) throw new Error("Wallet not connected");
+      if (!connected || !program || !publicKey)
+        throw new Error("Wallet not connected");
 
-      notify("success", `Deposit successfully`);
+      setDepositing(true);
+
+      const [userBalance] = PublicKey.findProgramAddressSync(
+        [Buffer.from("balance_4"), publicKey.toBuffer()],
+        SPL_TOKEN_LENDING_PROGRAM_ID
+      );
+
+      const result = await program?.methods
+        .deposit(new anchor.BN(Number(depositValue) * 10 ** 9))
+        .accounts({
+          userBalance,
+          payer: publicKey,
+          systemProgram: SystemProgram.programId,
+        })
+        .rpc();
+
+      await getBalance();
+      await getLendableBalance();
+
+      setDepositing(false);
+      notify("success", `Deposit successfully, transaction hash is ${result}`);
     } catch (error: any) {
-      notify("error", `Deposit In failed: ${error?.message}`);
+      setDepositing(false);
+      notify("error", `Deposit failed: ${error?.message}`);
     }
-  }, [connected, notify]);
+  }, [
+    connected,
+    program,
+    publicKey,
+    depositValue,
+    getBalance,
+    getLendableBalance,
+    notify,
+  ]);
 
-  const handleBorrow = useCallback(async () => {
+  const handleLend = useCallback(async () => {
     try {
-      if (!connected) throw new Error("Wallet not connected");
+      if (!connected || !publicKey) throw new Error("Wallet not connected");
 
-      notify("success", `Borrow successfully`);
+      setLending(true);
+
+      const [globalState] = PublicKey.findProgramAddressSync(
+        [Buffer.from("state_4")],
+        SPL_TOKEN_LENDING_PROGRAM_ID
+      );
+      const [config] = PublicKey.findProgramAddressSync(
+        [Buffer.from("config_4")],
+        SPL_TOKEN_LENDING_PROGRAM_ID
+      );
+      const stateInfo = await connection.getAccountInfo(globalState);
+
+      if (stateInfo) {
+        const [order] = PublicKey.findProgramAddressSync(
+          [Buffer.from("order_4"), stateInfo.data.subarray(8, 16)],
+          SPL_TOKEN_LENDING_PROGRAM_ID
+        );
+        const [userBalance] = PublicKey.findProgramAddressSync(
+          [Buffer.from("balance_4"), publicKey.toBuffer()],
+          SPL_TOKEN_LENDING_PROGRAM_ID
+        );
+
+        const result = await program?.methods
+          .placeOrder(
+            new anchor.BN(Number(lendValue) * 10 ** 9),
+            new anchor.BN(100)
+          )
+          .accounts({
+            order,
+            config,
+            userBalance,
+            payer: publicKey,
+            global: globalState,
+            systemProgram: SystemProgram.programId,
+          })
+          .rpc();
+
+        getOrders();
+        notify("success", `Lend successfully, transaction hash ${result}`);
+      }
     } catch (error: any) {
-      notify("error", `Deposit In failed: ${error?.message}`);
+      notify("error", `Lend failed: ${error?.message}`);
+    } finally {
+      setLending(false);
     }
-  }, [connected, notify]);
+  }, [
+    connected,
+    publicKey,
+    connection,
+    program?.methods,
+    lendValue,
+    getOrders,
+    notify,
+  ]);
+
+  const handleBorrow = useCallback(async () => {}, []);
 
   useEffect(() => {
     if (connected) {
+      getOrders();
       getBalance();
+      getLendableBalance();
     }
-  }, [connected, getBalance]);
+  }, [connected, getLendableBalance, getBalance, getOrders]);
+
+  console.log("orders:", orderList);
 
   return (
-    <main className="container flex min-h-screen flex-col items-center mx-auto py-4">
+    <main className="container flex min-h-screen flex-col mx-auto py-4">
       <div className="w-full items-center justify-between text-sm flex">
         <code className="font-bold">CC LENDING</code>
         <WalletMultiButton className="rounded-full bg-gradient-to-tr from-pink-500 to-yellow-500" />
       </div>
-      <div className="grid grid-cols-2 gap-6 mt-20">
-        <Card className="w-96">
+      <div className="grid grid-cols-2 gap-6 mt-16">
+        <Card>
           <CardHeader>
-            <Image
-              src="https://s2.coinmarketcap.com/static/img/coins/64x64/5426.png"
-              className="w-6 h-6 rounded-full"
-              alt="solana"
-            />
-            <p className="font-semibold ml-2">Lending</p>
+            <p className="font-semibold ml-2">Deposit</p>
           </CardHeader>
           <CardBody className="flex-col justify-between text-small">
             <div>
               <div className="flex items-center justify-between">
                 <label className="text-slate-500">Balance</label>
-                <p className="font-semibold text-slate-700">{balance} SOL</p>
+                <p className="font-semibold text-slate-700">
+                  {balance.toFixed(4)} SOL
+                </p>
               </div>
               <Input
                 type="number"
@@ -120,59 +278,39 @@ export default function Home() {
             </div>
             <Button
               className="mt-6"
+              isLoading={depositing}
               color={depositDisabled ? undefined : "primary"}
               disabled={depositDisabled}
               onClick={handleDeposit}
             >
-              Deposit
+              Deposit {depositValue ? `${depositValue} SOL` : ""}
             </Button>
           </CardBody>
         </Card>
-        <Card className="w-96">
+        <Card>
           <CardHeader>
-            <Image
-              src="https://s2.coinmarketcap.com/static/img/coins/64x64/5426.png"
-              className="w-6 h-6 rounded-full"
-              alt="solana"
-            />
-            <p className="font-semibold ml-2">Order</p>
+            <p className="font-semibold ml-2">Balance</p>
           </CardHeader>
           <CardBody className="flex-col justify-between pt-0 text-small">
             <div>
               <div className="flex py-2 items-center justify-between">
                 <label className="text-slate-500">Lendable amount</label>
-                <p className="font-semibold text-slate-700">0.5 SOL</p>
+                <p className="font-semibold text-slate-700">
+                  {lendableBalance.toFixed(4)} SOL
+                </p>
               </div>
               <div className="flex py-2 items-center justify-between">
                 <label className="text-slate-500">Monthly interest rate</label>
                 <p className="font-semibold text-slate-700">1%</p>
               </div>
-              <RadioGroup
-                label={
-                  <label className="text-slate-500">Select your token</label>
-                }
-                defaultValue={radioList[0].value}
-                className="py-2"
-                orientation="horizontal"
-              >
-                {radioList.map((item) => (
-                  <Radio
-                    key={item.value}
-                    value={item.value}
-                    classNames={{ label: "text-slate-700" }}
-                  >
-                    {item.label}
-                  </Radio>
-                ))}
-              </RadioGroup>
               <Input
                 type="number"
                 label={<label className="text-slate-500">Amount</label>}
                 min={0}
                 max={999}
                 fullWidth
-                value={borrowValue}
-                onChange={(e) => setBorrowValue(e.target.value)}
+                value={lendValue}
+                onChange={(e) => setLendValue(e.target.value)}
                 labelPlacement="outside-left"
                 placeholder="Enter your amount"
                 className="py-2 justify-between"
@@ -184,14 +322,59 @@ export default function Home() {
             </div>
             <Button
               className="mt-6"
-              color={borrowDisabled ? undefined : "primary"}
-              disabled={borrowDisabled}
-              onClick={handleBorrow}
+              isLoading={lending}
+              color={lendDisabled ? undefined : "primary"}
+              disabled={lendDisabled}
+              onClick={handleLend}
             >
-              Borrow
+              Lend {lendValue ? `${lendValue} SOL` : ""}
             </Button>
           </CardBody>
         </Card>
+      </div>
+      <h1 className="font-bold mt-16 mb-2">Orders</h1>
+      <div className="grid grid-cols-3 gap-6">
+        {orderList.map((item) => (
+          <Card key={`${item.sn}`}>
+            <CardHeader>
+              <Image
+                src="https://s2.coinmarketcap.com/static/img/coins/64x64/5426.png"
+                className="w-6 h-6 rounded-full"
+                alt="solana"
+              />
+              <p className="font-semibold ml-2">Borrow</p>
+            </CardHeader>
+            <CardBody className="flex-col justify-between text-small">
+              <div>
+                <div className="flex items-center justify-between">
+                  <label className="text-slate-500">Order SN</label>
+                  <p className="font-semibold text-slate-700">{item.sn}</p>
+                </div>
+                <div className="flex items-center justify-between py-4">
+                  <label className="text-slate-500">Lender</label>
+                  <p className="font-semibold text-slate-700">{item.lender}</p>
+                </div>
+                <div className="flex items-center justify-between py-4">
+                  <label className="text-slate-500">Balance</label>
+                  <p className="font-semibold text-slate-700">
+                    {item.balance.toFixed(4)} SOL
+                  </p>
+                </div>
+              </div>
+              <Button
+                className="mt-6"
+                isLoading={borrowing}
+                color={
+                  Number(item.balance.toFixed(0)) === 0 ? undefined : "primary"
+                }
+                disabled={Number(item.balance.toFixed(0)) === 0}
+                onClick={handleBorrow}
+              >
+                Borrow
+              </Button>
+            </CardBody>
+          </Card>
+        ))}
       </div>
     </main>
   );
