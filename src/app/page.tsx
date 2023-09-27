@@ -1,5 +1,6 @@
 "use client";
 
+import { format } from "date-fns";
 import * as anchor from "@project-serum/anchor";
 import { useWallet, useConnection } from "@solana/wallet-adapter-react";
 import { WalletMultiButton } from "@solana/wallet-adapter-react-ui";
@@ -18,7 +19,12 @@ import {
   ModalFooter,
   useDisclosure,
 } from "@nextui-org/react";
-import { LAMPORTS_PER_SOL, PublicKey, SystemProgram } from "@solana/web3.js";
+import {
+  LAMPORTS_PER_SOL,
+  SYSVAR_CLOCK_PUBKEY,
+  PublicKey,
+  SystemProgram,
+} from "@solana/web3.js";
 import { useEffect, useState, useMemo, useCallback } from "react";
 import { useNotify } from "@/components/Notify";
 import {
@@ -34,12 +40,26 @@ type Order = {
   rate: number;
 };
 
+type Receipt = {
+  sn: number;
+  borrower: string;
+  lender: string;
+  rate: number;
+  amount: number;
+  time: number;
+};
+
 export default function Home() {
   const notify = useNotify();
   const { program } = useWorkspace();
   const { connection } = useConnection();
   const { connected, publicKey } = useWallet();
   const { isOpen, onOpen, onClose } = useDisclosure();
+  const {
+    isOpen: isReceiptOpen,
+    onOpen: onReceiptOpen,
+    onClose: onReceiptClose,
+  } = useDisclosure();
 
   const [balance, setBalance] = useState(0);
   const [lendableBalance, setLendableBalance] = useState(0);
@@ -49,9 +69,13 @@ export default function Home() {
   const [lending, setLending] = useState(false);
   const [depositing, setDepositing] = useState(false);
   const [borrowing, setBorrowing] = useState(false);
+  const [repaying, setRepaying] = useState(false);
   const [order, setOrder] = useState<Order | undefined>();
+  const [receipt, setReceipt] = useState<Receipt | undefined>();
   const [orderList, setOrderList] = useState<Order[]>([]);
-  const [loading, setLoading] = useState(false);
+  const [receiptList, setReceiptList] = useState<Receipt[]>([]);
+  const [, setLoading] = useState(false);
+  const [receiptLoading, setReceiptLoading] = useState(false);
 
   const depositDisabled = useMemo(
     () =>
@@ -146,7 +170,56 @@ export default function Home() {
     } finally {
       setLoading(true);
     }
-  }, [connected, connection, notify]);
+  }, [connection, notify]);
+
+  const getReceipts = useCallback(async () => {
+    try {
+      if (!connected || !program || !publicKey)
+        throw new Error("Wallet not connected");
+
+      setReceiptLoading(true);
+
+      const receipts = await connection.getProgramAccounts(
+        SPL_TOKEN_LENDING_PROGRAM_ID,
+        {
+          filters: [
+            { dataSize: 98 },
+            {
+              memcmp: {
+                offset: 16,
+                bytes: publicKey.toBase58(),
+              },
+            },
+          ],
+        }
+      );
+      const list = receipts.map((e) => {
+        const data = e.account.data;
+        const sn = Number(data.readBigUInt64LE(8));
+        const borrower = new PublicKey(data.subarray(16, 48));
+        const lender = new PublicKey(data.subarray(48, 80));
+        const amount = Number(data.readBigUInt64LE(80));
+        const time = Number(data.readBigUInt64LE(88));
+        const rate = data.readUInt16LE(96);
+
+        return {
+          sn,
+          lender: lender.toBase58(),
+          borrower: borrower.toBase58(),
+          amount: amount / LAMPORTS_PER_SOL,
+          time,
+          rate,
+        };
+      });
+
+      setReceiptList(list);
+      setReceiptLoading(false);
+    } catch (error: any) {
+      notify("error", `Get orders failed: ${error?.message}`);
+    } finally {
+      setReceiptLoading(false);
+    }
+  }, [connected, connection, notify, program, publicKey]);
 
   const handleDeposit = useCallback(async () => {
     try {
@@ -247,7 +320,7 @@ export default function Home() {
     notify,
   ]);
 
-  const handleOpen = useCallback(
+  const handleOrderOpen = useCallback(
     (item: Order) => {
       setOrder(item);
       onOpen();
@@ -257,36 +330,156 @@ export default function Home() {
 
   const handleClose = () => {
     onClose();
-    setBorrowValue("");
     setOrder(undefined);
+  };
+
+  const handleReceiptOpen = useCallback(
+    (item: Receipt) => {
+      setReceipt(item);
+      onReceiptOpen();
+    },
+    [onReceiptOpen]
+  );
+
+  const handleReceiptClose = () => {
+    onReceiptClose();
+    setBorrowValue("");
+    setReceipt(undefined);
   };
 
   const handleBorrow = useCallback(async () => {
     try {
       setBorrowing(true);
 
+      if (!connected || !publicKey) throw new Error("Wallet not connected");
+
       if (order) {
-        setTimeout(() => {
-          setBorrowing(false);
-        }, 3000);
+        const [globalState] = PublicKey.findProgramAddressSync(
+          [Buffer.from("state_4")],
+          SPL_TOKEN_LENDING_PROGRAM_ID
+        );
+        const stateInfo = await connection.getAccountInfo(globalState);
+        const buffer = Buffer.allocUnsafe(8);
+
+        buffer.writeBigUInt64LE(BigInt(order.sn));
+
+        const [orderAddress] = PublicKey.findProgramAddressSync(
+          [Buffer.from("order_4"), buffer],
+          SPL_TOKEN_LENDING_PROGRAM_ID
+        );
+
+        if (stateInfo) {
+          const [receiptAddress] = PublicKey.findProgramAddressSync(
+            [Buffer.from("receipt_4"), stateInfo.data.subarray(16, 24)],
+            SPL_TOKEN_LENDING_PROGRAM_ID
+          );
+
+          await program?.methods
+            .borrow(
+              new anchor.BN(order.sn),
+              new anchor.BN(Number(borrowValue) * 10 ** 9)
+            )
+            .accounts({
+              receipt: receiptAddress,
+              order: orderAddress,
+              global: globalState,
+              recipient: publicKey,
+              payer: publicKey,
+              systemProgram: SystemProgram.programId,
+              clock: SYSVAR_CLOCK_PUBKEY,
+            })
+            .rpc();
+        }
+
+        onClose();
+        setBorrowing(false);
+        getBalance();
+        getOrders();
       }
     } catch (error: any) {
       notify("error", `Borrow failed: ${error?.message}`);
     } finally {
       setBorrowing(false);
     }
-  }, [notify, order]);
+  }, [
+    borrowValue,
+    connected,
+    connection,
+    notify,
+    onClose,
+    getBalance,
+    getOrders,
+    order,
+    program?.methods,
+    publicKey,
+  ]);
+
+  const handleReceipt = useCallback(async () => {
+    try {
+      setRepaying(true);
+
+      if (!connected || !publicKey) throw new Error("Wallet not connected");
+
+      if (receipt) {
+        const buffer = Buffer.allocUnsafe(8);
+
+        buffer.writeBigUInt64LE(BigInt(receipt.sn));
+
+        const [receiptAddress] = PublicKey.findProgramAddressSync(
+          [Buffer.from("receipt_4"), buffer],
+          SPL_TOKEN_LENDING_PROGRAM_ID
+        );
+        const receiptInfo = await connection.getAccountInfo(receiptAddress);
+
+        if (receiptInfo) {
+          const lender = new PublicKey(receiptInfo.data.subarray(48, 80));
+          const [lenderBalanceAddress] = PublicKey.findProgramAddressSync(
+            [Buffer.from("balance_4"), lender.toBuffer()],
+            SPL_TOKEN_LENDING_PROGRAM_ID
+          );
+
+          await program?.methods
+            .repay(new anchor.BN(receipt.sn))
+            .accounts({
+              receipt: receiptAddress,
+              lenderBalance: lenderBalanceAddress,
+              payer: publicKey,
+              systemProgram: SystemProgram.programId,
+            })
+            .rpc();
+        }
+
+        onReceiptClose();
+        setRepaying(false);
+        getLendableBalance();
+        getReceipts();
+      }
+    } catch (error: any) {
+      notify("error", `Borrow failed: ${error?.message}`);
+    } finally {
+      setBorrowing(false);
+    }
+  }, [
+    connected,
+    connection,
+    getLendableBalance,
+    getReceipts,
+    notify,
+    onReceiptClose,
+    program?.methods,
+    publicKey,
+    receipt,
+  ]);
 
   useEffect(() => {
     getOrders();
 
     if (connected) {
       getBalance();
+      getReceipts();
       getLendableBalance();
     }
-  }, [connected, getLendableBalance, getBalance, getOrders]);
-
-  console.log("orders:", orderList);
+  }, [connected, getLendableBalance, getBalance, getOrders, getReceipts]);
 
   return (
     <main className="container flex min-h-screen flex-col mx-auto py-4">
@@ -380,6 +573,69 @@ export default function Home() {
           </CardBody>
         </Card>
       </div>
+      <h1 className="font-bold mt-16 mb-2">Receipts</h1>
+      {!receiptLoading ? (
+        <div className="grid grid-cols-3 gap-6">
+          {receiptList.map((item) => (
+            <Card key={`${item.sn}`}>
+              <CardHeader>
+                <Image
+                  src="https://s2.coinmarketcap.com/static/img/coins/64x64/5426.png"
+                  className="w-6 h-6 rounded-full"
+                  alt="solana"
+                />
+                <p className="font-semibold ml-2">Receipt</p>
+              </CardHeader>
+              <CardBody className="flex-col justify-between text-small pt-0">
+                <div>
+                  <div className="flex items-center justify-between py-2">
+                    <label className="text-slate-500">Receipt SN</label>
+                    <p className="font-semibold text-slate-700">{item.sn}</p>
+                  </div>
+                  <div className="flex items-center justify-between py-2">
+                    <label className="text-slate-500">Lender</label>
+                    <p className="font-semibold text-slate-700">
+                      {getShortAddress(item.lender)}
+                    </p>
+                  </div>
+                  <div className="flex items-center justify-between py-2">
+                    <label className="text-slate-500">Borrower</label>
+                    <p className="font-semibold text-slate-700">
+                      {getShortAddress(item.borrower)}
+                    </p>
+                  </div>
+                  <div className="flex items-center justify-between py-2">
+                    <label className="text-slate-500">Amount</label>
+                    <p className="font-semibold text-slate-700">
+                      {item.amount.toFixed(4)} SOL
+                    </p>
+                  </div>
+                  <div className="flex items-center justify-between py-2">
+                    <label className="text-slate-500">Rate</label>
+                    <p className="font-semibold text-slate-700">
+                      {item.rate / 100}%
+                    </p>
+                  </div>
+                </div>
+                <Button
+                  className="mt-6"
+                  color={
+                    Number(item.amount.toFixed(4)) === 0 || !connected
+                      ? undefined
+                      : "primary"
+                  }
+                  disabled={Number(item.amount.toFixed(4)) === 0 || !connected}
+                  onClick={() => handleReceiptOpen(item)}
+                >
+                  Repay
+                </Button>
+              </CardBody>
+            </Card>
+          ))}
+        </div>
+      ) : (
+        <Spinner />
+      )}
       <h1 className="font-bold mt-16 mb-2">Orders</h1>
       {orderList.length ? (
         <div className="grid grid-cols-3 gap-6">
@@ -420,7 +676,7 @@ export default function Home() {
                       : "primary"
                   }
                   disabled={Number(item.balance.toFixed(4)) === 0 || !connected}
-                  onClick={() => handleOpen(item)}
+                  onClick={() => handleOrderOpen(item)}
                 >
                   Borrow
                 </Button>
@@ -475,6 +731,43 @@ export default function Home() {
                   onPress={handleBorrow}
                 >
                   Borrow
+                </Button>
+              </ModalFooter>
+            </>
+          )}
+        </ModalContent>
+      </Modal>
+      <Modal isOpen={isReceiptOpen} onClose={handleReceiptClose}>
+        <ModalContent>
+          {(onClose) => (
+            <>
+              <ModalHeader className="flex flex-col gap-1">Return</ModalHeader>
+              <ModalBody>
+                <div className="flex items-center justify-between py-2">
+                  <label className="text-slate-500">Receipt SN</label>
+                  <p className="font-semibold text-slate-700">{receipt?.sn}</p>
+                </div>
+                <div className="flex items-center justify-between py-2">
+                  <label className="text-slate-500">Amount</label>
+                  <p className="font-semibold text-slate-700">
+                    {receipt?.amount.toFixed(4)} SOL
+                  </p>
+                </div>
+              </ModalBody>
+              <ModalFooter>
+                <Button
+                  color="danger"
+                  variant="light"
+                  onPress={handleReceiptClose}
+                >
+                  Close
+                </Button>
+                <Button
+                  isLoading={repaying}
+                  color="primary"
+                  onPress={handleReceipt}
+                >
+                  Repay
                 </Button>
               </ModalFooter>
             </>
