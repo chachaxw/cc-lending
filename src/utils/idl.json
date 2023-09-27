@@ -200,9 +200,122 @@
           "type": "u64"
         }
       ]
+    },
+    {
+      "name": "borrow",
+      "accounts": [
+        {
+          "name": "receipt",
+          "isMut": true,
+          "isSigner": false
+        },
+        {
+          "name": "order",
+          "isMut": true,
+          "isSigner": false
+        },
+        {
+          "name": "global",
+          "isMut": true,
+          "isSigner": false
+        },
+        {
+          "name": "recipient",
+          "isMut": true,
+          "isSigner": false
+        },
+        {
+          "name": "payer",
+          "isMut": true,
+          "isSigner": true
+        },
+        {
+          "name": "systemProgram",
+          "isMut": false,
+          "isSigner": false
+        },
+        {
+          "name": "clock",
+          "isMut": false,
+          "isSigner": false
+        }
+      ],
+      "args": [
+        {
+          "name": "orderSn",
+          "type": "u64"
+        },
+        {
+          "name": "amount",
+          "type": "u64"
+        }
+      ]
+    },
+    {
+      "name": "repay",
+      "accounts": [
+        {
+          "name": "receipt",
+          "isMut": true,
+          "isSigner": false
+        },
+        {
+          "name": "lenderBalance",
+          "isMut": true,
+          "isSigner": false
+        },
+        {
+          "name": "payer",
+          "isMut": true,
+          "isSigner": true
+        },
+        {
+          "name": "systemProgram",
+          "isMut": false,
+          "isSigner": false
+        }
+      ],
+      "args": [
+        {
+          "name": "receiptSn",
+          "type": "u64"
+        }
+      ]
     }
   ],
   "accounts": [
+    {
+      "name": "LoanReceipt",
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "sn",
+            "type": "u64"
+          },
+          {
+            "name": "borrower",
+            "type": "publicKey"
+          },
+          {
+            "name": "lender",
+            "type": "publicKey"
+          },
+          {
+            "name": "amount",
+            "type": "u64"
+          },
+          {
+            "name": "time",
+            "type": "u64"
+          },
+          {
+            "name": "rate",
+            "type": "u16"
+          }
+        ]
+      }
+    },
     {
       "name": "Order",
       "type": {
@@ -332,6 +445,81 @@
           "index": false
         }
       ]
+    },
+    {
+      "name": "EventBorrowSuccess",
+      "fields": [
+        {
+          "name": "receiptSn",
+          "type": "u64",
+          "index": false
+        },
+        {
+          "name": "borrower",
+          "type": "publicKey",
+          "index": false
+        },
+        {
+          "name": "lender",
+          "type": "publicKey",
+          "index": false
+        },
+        {
+          "name": "source",
+          "type": {
+            "array": [
+              "u8",
+              20
+            ]
+          },
+          "index": false
+        },
+        {
+          "name": "chainid",
+          "type": "u32",
+          "index": false
+        },
+        {
+          "name": "cSn",
+          "type": "u64",
+          "index": false
+        },
+        {
+          "name": "token",
+          "type": {
+            "array": [
+              "u8",
+              20
+            ]
+          },
+          "index": false
+        },
+        {
+          "name": "frozen",
+          "type": "u64",
+          "index": false
+        },
+        {
+          "name": "amount",
+          "type": "u64",
+          "index": false
+        },
+        {
+          "name": "time",
+          "type": "u64",
+          "index": false
+        },
+        {
+          "name": "rate",
+          "type": "u16",
+          "index": false
+        },
+        {
+          "name": "orderSn",
+          "type": "u64",
+          "index": false
+        }
+      ]
     }
   ],
   "errors": [
@@ -354,6 +542,26 @@
       "code": 6003,
       "name": "NoOrderFoundForCancelOrder",
       "msg": "No Order Found for Cancel Order"
+    },
+    {
+      "code": 6004,
+      "name": "InvalidOrderSNForBorrow",
+      "msg": "Invalid Order for Borrow"
+    },
+    {
+      "code": 6005,
+      "name": "InsufficientOrderBlanaceForBorrow",
+      "msg": "Insufficient Order Balance for Borrow"
+    },
+    {
+      "code": 6006,
+      "name": "NoOperationPermission",
+      "msg": "No Operation Permission"
+    },
+    {
+      "code": 6007,
+      "name": "NoReceiptFoundForRepay",
+      "msg": "No Receipt Found for Repay"
     }
   ]
 }
