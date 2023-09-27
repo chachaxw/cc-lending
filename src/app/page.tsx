@@ -10,6 +10,7 @@ import {
   CardBody,
   Input,
   Image,
+  Spinner,
   Modal,
   ModalContent,
   ModalHeader,
@@ -380,60 +381,61 @@ export default function Home() {
         </Card>
       </div>
       <h1 className="font-bold mt-16 mb-2">Orders</h1>
-      <div className="grid grid-cols-3 gap-6">
-        {orderList.map((item) => (
-          <Card key={`${item.sn}`}>
-            <CardHeader>
-              <Image
-                src="https://s2.coinmarketcap.com/static/img/coins/64x64/5426.png"
-                className="w-6 h-6 rounded-full"
-                alt="solana"
-              />
-              <p className="font-semibold ml-2">Borrow</p>
-            </CardHeader>
-            <CardBody className="flex-col justify-between text-small pt-0">
-              <div>
-                <div className="flex items-center justify-between py-2">
-                  <label className="text-slate-500">Order SN</label>
-                  <p className="font-semibold text-slate-700">{item.sn}</p>
+      {orderList.length ? (
+        <div className="grid grid-cols-3 gap-6">
+          {orderList.map((item) => (
+            <Card key={`${item.sn}`}>
+              <CardHeader>
+                <Image
+                  src="https://s2.coinmarketcap.com/static/img/coins/64x64/5426.png"
+                  className="w-6 h-6 rounded-full"
+                  alt="solana"
+                />
+                <p className="font-semibold ml-2">Order</p>
+              </CardHeader>
+              <CardBody className="flex-col justify-between text-small pt-0">
+                <div>
+                  <div className="flex items-center justify-between py-2">
+                    <label className="text-slate-500">Order SN</label>
+                    <p className="font-semibold text-slate-700">{item.sn}</p>
+                  </div>
+                  <div className="flex items-center justify-between py-2">
+                    <label className="text-slate-500">Balance</label>
+                    <p className="font-semibold text-slate-700">
+                      {item.balance.toFixed(4)} SOL
+                    </p>
+                  </div>
+                  <div className="flex items-center justify-between py-2">
+                    <label className="text-slate-500">Lender</label>
+                    <p className="font-semibold text-slate-700">
+                      {getShortAddress(item.lender)}
+                    </p>
+                  </div>
                 </div>
-                <div className="flex items-center justify-between py-2">
-                  <label className="text-slate-500">Balance</label>
-                  <p className="font-semibold text-slate-700">
-                    {item.balance.toFixed(4)} SOL
-                  </p>
-                </div>
-                <div className="flex items-center justify-between py-2">
-                  <label className="text-slate-500">Lender</label>
-                  <p className="font-semibold text-slate-700">
-                    {getShortAddress(item.lender)}
-                  </p>
-                </div>
-              </div>
-              <Button
-                className="mt-6"
-                isLoading={borrowing}
-                color={
-                  Number(item.balance.toFixed(4)) === 0 || !connected
-                    ? undefined
-                    : "primary"
-                }
-                disabled={Number(item.balance.toFixed(4)) === 0 || !connected}
-                onClick={() => handleOpen(item)}
-              >
-                Borrow
-              </Button>
-            </CardBody>
-          </Card>
-        ))}
-      </div>
+                <Button
+                  className="mt-6"
+                  color={
+                    Number(item.balance.toFixed(4)) === 0 || !connected
+                      ? undefined
+                      : "primary"
+                  }
+                  disabled={Number(item.balance.toFixed(4)) === 0 || !connected}
+                  onClick={() => handleOpen(item)}
+                >
+                  Borrow
+                </Button>
+              </CardBody>
+            </Card>
+          ))}
+        </div>
+      ) : (
+        <Spinner />
+      )}
       <Modal isOpen={isOpen} onClose={handleClose}>
         <ModalContent>
           {(onClose) => (
             <>
-              <ModalHeader className="flex flex-col gap-1">
-                Modal Title
-              </ModalHeader>
+              <ModalHeader className="flex flex-col gap-1">Borrow</ModalHeader>
               <ModalBody>
                 <div className="flex items-center justify-between py-2">
                   <label className="text-slate-500">Order SN</label>
@@ -469,6 +471,7 @@ export default function Home() {
                 <Button
                   color={borrowDisabled ? undefined : "primary"}
                   disabled={borrowDisabled}
+                  isLoading={borrowing}
                   onPress={handleBorrow}
                 >
                   Borrow
